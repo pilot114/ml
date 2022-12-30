@@ -1,0 +1,234 @@
+// пример задачи https://www.youtube.com/watch?v=RVUpCdVhF60
+// на его основе сделать удобную обертку
+
+
+#%%
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import nltk
+import string
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import SnowballStemmer
+nltk.download('punkt')
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics import precision_score, recall_score, precision_recall_curve
+from matplotlib import pyplot as plt
+from sklearn.metrics import plot_precision_recall_curve
+import numpy as np
+from sklearn.model_selection import GridSearchCV
+
+#%%
+
+df = pd.read_csv("./data/labeled.csv", sep=",")
+
+#%%
+
+df.shape
+
+#%%
+
+df.head(5)
+
+#%%
+
+df["toxic"] = df["toxic"].apply(int)
+
+#%%
+
+df.head(5)
+
+#%%
+
+df["toxic"].value_counts()
+
+#%%
+
+for c in df[df["toxic"] == 1]["comment"].head(5):
+    print(c)
+
+#%%
+
+for c in df[df["toxic"] == 0]["comment"].head(5):
+    print(c)
+
+#%%
+
+train_df, test_df = train_test_split(df, test_size=500)
+
+#%%
+
+test_df.shape
+
+#%%
+
+test_df["toxic"].value_counts()
+
+#%%
+
+train_df["toxic"].value_counts()
+
+#%%
+
+sentence_example = df.iloc[1]["comment"]
+tokens = word_tokenize(sentence_example, language="russian")
+tokens_without_punctuation = [i for i in tokens if i not in string.punctuation]
+russian_stop_words = stopwords.words("russian")
+tokens_without_stop_words_and_punctuation = [i for i in tokens_without_punctuation if i not in russian_stop_words]
+snowball = SnowballStemmer(language="russian")
+stemmed_tokens = [snowball.stem(i) for i in tokens_without_stop_words_and_punctuation]
+
+#%%
+
+print(f"Исходный текст: {sentence_example}")
+print("-----------------")
+print(f"Токены: {tokens}")
+print("-----------------")
+print(f"Токены без пунктуации: {tokens_without_punctuation}")
+print("-----------------")
+print(f"Токены без пунктуации и стоп слов: {tokens_without_stop_words_and_punctuation}")
+print("-----------------")
+print(f"Токены после стемминга: {stemmed_tokens}")
+print("-----------------")
+
+#%%
+
+snowball = SnowballStemmer(language="russian")
+russian_stop_words = stopwords.words("russian")
+
+def tokenize_sentence(sentence: str, remove_stop_words: bool = True):
+    tokens = word_tokenize(sentence, language="russian")
+    tokens = [i for i in tokens if i not in string.punctuation]
+    if remove_stop_words:
+        tokens = [i for i in tokens if i not in russian_stop_words]
+    tokens = [snowball.stem(i) for i in tokens]
+    return tokens
+
+#%%
+
+tokenize_sentence(sentence_example)
+
+#%%
+
+vectorizer = TfidfVectorizer(tokenizer=lambda x: tokenize_sentence(x, remove_stop_words=True))
+
+#%%
+
+features = vectorizer.fit_transform(train_df["comment"])
+
+#%%
+
+model = LogisticRegression(random_state=0)
+model.fit(features, train_df["toxic"])
+
+#%%
+
+model.predict(features[0])
+
+#%%
+
+train_df["comment"].iloc[0]
+
+#%%
+
+model_pipeline = Pipeline([
+    ("vectorizer", TfidfVectorizer(tokenizer=lambda x: tokenize_sentence(x, remove_stop_words=True))),
+    ("model", LogisticRegression(random_state=0))
+]
+)
+
+#%%
+
+model_pipeline.fit(train_df["comment"], train_df["toxic"])
+
+#%%
+
+model_pipeline.predict(["Привет, у меня все нормально"])
+
+#%%
+
+model_pipeline.predict(["Слушай не пойти ли тебе нафиг отсюда?"])
+
+#%%
+
+precision_score(y_true=test_df["toxic"], y_pred=model_pipeline.predict(test_df["comment"]))
+
+#%%
+
+recall_score(y_true=test_df["toxic"], y_pred=model_pipeline.predict(test_df["comment"]))
+
+#%%
+
+prec, rec, thresholds = precision_recall_curve(y_true=test_df["toxic"], probas_pred=model_pipeline.predict_proba(test_df["comment"])[:, 1])
+
+#%%
+
+plot_precision_recall_curve(estimator=model_pipeline, X=test_df["comment"], y=test_df["toxic"])
+
+#%%
+
+np.where(prec > 0.95)
+
+#%%
+
+thresholds[374]
+
+#%%
+
+precision_score(y_true=test_df["toxic"], y_pred=model_pipeline.predict_proba(test_df["comment"])[:, 1] > thresholds[374])
+
+#%%
+
+recall_score(y_true=test_df["toxic"], y_pred=model_pipeline.predict_proba(test_df["comment"])[:, 1] > thresholds[374])
+
+#%%
+
+grid_pipeline = Pipeline([
+    ("vectorizer", TfidfVectorizer(tokenizer=lambda x: tokenize_sentence(x, remove_stop_words=True))),
+    ("model", 
+     GridSearchCV(
+        LogisticRegression(random_state=0),
+        param_grid={'C': [0.1, 1, 10.]},
+        cv=3,
+         verbose=4
+        )
+    )
+])
+
+#%%
+
+grid_pipeline.fit(train_df["comment"], train_df["toxic"])
+
+#%%
+
+model_pipeline_c_10 = Pipeline([
+    ("vectorizer", TfidfVectorizer(tokenizer=lambda x: tokenize_sentence(x, remove_stop_words=True))),
+    ("model", LogisticRegression(random_state=0, C=10.))
+]
+)
+
+#%%
+
+model_pipeline_c_10.fit(train_df["comment"], train_df["toxic"])
+
+#%%
+
+prec_c_10, rec_c_10, thresholds_c_10 = precision_recall_curve(y_true=test_df["toxic"], probas_pred=model_pipeline_c_10.predict_proba(test_df["comment"])[:, 1])
+
+#%%
+
+np.where(prec_c_10 > 0.95)
+
+#%%
+
+precision_score(y_true=test_df["toxic"], y_pred=model_pipeline_c_10.predict_proba(test_df["comment"])[:, 1] > thresholds_c_10[316])
+
+#%%
+
+recall_score(y_true=test_df["toxic"], y_pred=model_pipeline_c_10.predict_proba(test_df["comment"])[:, 1] > thresholds_c_10[316])
+
+#%%
+
